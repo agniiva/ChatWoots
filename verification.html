@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>n8n Chat Widget Verification</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f3f4f6;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            color: #374151;
+        }
+        .container {
+            text-align: center;
+            max-width: 600px;
+            padding: 2rem;
+        }
+        h1 { margin-bottom: 1rem; }
+        p { margin-bottom: 2rem; line-height: 1.5; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Widget Verification Page</h1>
+        <p>The chat widget should appear in the bottom right corner.</p>
+        <p>Click the bubble to open the chat. Verify that the welcome message is "Hi there 👋" and the branding matches the default configuration.</p>
+    </div>
+
+    <!-- n8n Chat Widget Configuration -->
+    <script>
+        window.ChatWidgetConfig = {
+            webhook: {
+                url: 'https://n8n.example.com/webhook/test',
+                route: 'general'
+            },
+            branding: {
+                logo: '',
+                name: 'Test Assistant',
+                welcomeText: 'Hi there 👋',
+                responseTimeText: 'We typically reply in a few minutes',
+                poweredBy: {
+                    text: 'Powered by n8n',
+                    link: 'https://n8n.io'
+                }
+            },
+            style: {
+                primaryColor: '#854fff',
+                secondaryColor: '#6b3fd4',
+                position: 'right',
+                backgroundColor: '#ffffff',
+                fontColor: '#333333'
+            },
+            faq: [
+                { question: "Is this a test?", answer: "Yes, this is a verification test." },
+                { question: "Does it work?", answer: "If you see this, yes!" }
+            ]
+        };
+    </script>
+    <!-- Load the widget script from the public directory -->
+    <script src="./public/chat-widget.js" defer></script>
+</body>
+</html>
