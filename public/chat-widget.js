@@ -388,10 +388,6 @@
             name: '',
             welcomeText: 'Hi there 👋',
             responseTimeText: 'We typically reply in a few minutes',
-            poweredBy: {
-                text: 'Powered by BenAI',
-                link: 'https://n8n.partnerlinks.io/m8a94i19zhqq?utm_source=nocodecreative.io'
-            }
         },
         style: {
             primaryColor: '',
@@ -406,7 +402,9 @@
             popupMessage: '',
             autoOpenDelay: 0,
             animation: 'fade',
-            soundEnabled: true
+            soundEnabled: true,
+            showInitialMessage: true,
+            initialMessage: 'Hello! How can I help you today?'
         },
         faq: [] // Array of { question: string, answer: string }
     };
@@ -427,7 +425,11 @@
     if (window.N8NChatWidgetInitialized) return;
     window.N8NChatWidgetInitialized = true;
 
-    let currentSessionId = '';
+    let currentSessionId = localStorage.getItem('n8n-chat-session-id');
+    if (!currentSessionId) {
+        currentSessionId = crypto.randomUUID();
+        localStorage.setItem('n8n-chat-session-id', currentSessionId);
+    }
 
     // Create widget container
     const widgetContainer = document.createElement('div');
@@ -480,7 +482,7 @@
             ${faqHTML}
         </div>
         <div class="chat-footer">
-            ${config.branding.poweredBy.text} <a href="${config.branding.poweredBy.link}" target="_blank">n8n</a>
+            Powered by BenAI <a href="https://n8n.partnerlinks.io/m9g5u41hwszk" target="_blank">n8n</a>
         </div>
     `;
 
@@ -502,7 +504,7 @@
                 </button>
             </div>
             <div class="chat-footer">
-                ${config.branding.poweredBy.text} <a href="${config.branding.poweredBy.link}" target="_blank">n8n</a>
+                Powered by BenAI <a href="https://n8n.partnerlinks.io/m9g5u41hwszk" target="_blank">n8n</a>
             </div>
         </div>
     `;
@@ -572,10 +574,10 @@
 
         widgetContainer.appendChild(popup);
 
-        setTimeout(() => {
+        window.n8nChatPopupTimer = setTimeout(() => {
             popup.classList.add('visible');
             if (config.behavior.soundEnabled) {
-                const audio = new Audio('data:audio/mp3;base64,//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq');
+                const audio = new Audio('data:audio/mp3;base64,//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq');
                 audio.volume = 0.5;
                 audio.play().catch(e => console.log('Audio play failed due to user interaction policy', e));
             }
@@ -609,18 +611,12 @@
     const sendButton = chatContainer.querySelector('button[type="submit"]');
     const backButton = chatContainer.querySelector('.back-button');
 
-    function generateUUID() {
-        return crypto.randomUUID();
-    }
-
     function autoResizeTextarea() {
         textarea.style.height = 'auto';
         textarea.style.height = textarea.scrollHeight + 'px';
     }
 
     async function startNewConversation() {
-        currentSessionId = generateUUID();
-
         // Switch view
         homeView.style.display = 'none';
         chatContainer.querySelector('.brand-header').style.display = 'none'; // Hide home header
@@ -628,6 +624,14 @@
 
         // Reset messages
         messagesContainer.innerHTML = '';
+
+        // Add initial bot message if enabled
+        if (config.behavior.showInitialMessage) {
+            const initialMessageDiv = document.createElement('div');
+            initialMessageDiv.className = 'chat-message bot';
+            initialMessageDiv.textContent = config.behavior.initialMessage || "Hello! How can I help you today?";
+            messagesContainer.appendChild(initialMessageDiv);
+        }
 
         const data = [{
             action: "loadPreviousSession",
@@ -731,6 +735,18 @@
 
     toggleButton.addEventListener('click', () => {
         chatContainer.classList.toggle('open');
+
+        // Stop/Remove popup if chat is opened
+        if (chatContainer.classList.contains('open')) {
+            if (window.n8nChatPopupTimer) {
+                clearTimeout(window.n8nChatPopupTimer);
+                window.n8nChatPopupTimer = null;
+            }
+            const popup = widgetContainer.querySelector('.chat-popup');
+            if (popup) {
+                popup.remove();
+            }
+        }
     });
 
     // FAQ Accordion
