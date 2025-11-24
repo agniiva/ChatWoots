@@ -231,6 +231,7 @@
             font-size: 14px;
             line-height: 1.5;
             animation: fadeIn 0.3s ease;
+            white-space: pre-wrap;
         }
 
         @keyframes fadeIn {
