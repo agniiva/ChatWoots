@@ -1,7 +1,104 @@
-// Chat Widget Script
+// Chat Widget Script (Markdown-enabled + sanitized)
 (function () {
-    // Create and inject styles
-    const styles = `
+  // -----------------------------
+  // Helpers (security + markdown)
+  // -----------------------------
+  const escapeHtml = (str) =>
+    String(str ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+
+  const loadScriptOnce = (src, globalName) =>
+    new Promise((resolve, reject) => {
+      if (globalName && window[globalName]) return resolve(true);
+
+      // Avoid duplicates if script already present
+      const existing = Array.from(document.scripts).find((s) => s.src === src);
+      if (existing) {
+        existing.addEventListener("load", () => resolve(true));
+        existing.addEventListener("error", reject);
+        return;
+      }
+
+      const s = document.createElement("script");
+      s.src = src;
+      s.async = true;
+      s.defer = true;
+      s.onload = () => resolve(true);
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+
+  let markdownReadyPromise = null;
+
+  const ensureMarkdownReady = async () => {
+    if (markdownReadyPromise) return markdownReadyPromise;
+
+    markdownReadyPromise = (async () => {
+      // marked + DOMPurify
+      await loadScriptOnce("https://cdn.jsdelivr.net/npm/marked/marked.min.js", "marked");
+      await loadScriptOnce("https://cdn.jsdelivr.net/npm/dompurify@3.0.8/dist/purify.min.js", "DOMPurify");
+
+      // Configure marked a bit nicer for chat
+      if (window.marked?.setOptions) {
+        window.marked.setOptions({
+          gfm: true,
+          breaks: true,     // newline => <br>
+          headerIds: false,
+          mangle: false
+        });
+      }
+
+      return true;
+    })();
+
+    return markdownReadyPromise;
+  };
+
+  const markdownToSafeHtml = (mdText) => {
+    const raw = String(mdText ?? "");
+    try {
+      const html = window.marked ? window.marked.parse(raw) : escapeHtml(raw);
+      // sanitize HTML output to prevent XSS
+      const clean = window.DOMPurify
+        ? window.DOMPurify.sanitize(html, {
+            USE_PROFILES: { html: true },
+            ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i
+          })
+        : escapeHtml(raw);
+
+      return clean;
+    } catch (e) {
+      return escapeHtml(raw);
+    }
+  };
+
+  const postProcessMessage = (containerEl) => {
+    // Make all links open in new tab safely
+    containerEl.querySelectorAll("a").forEach((a) => {
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+    });
+  };
+
+  const setMessageContent = async (el, textOrMd) => {
+    try {
+      await ensureMarkdownReady();
+      el.innerHTML = markdownToSafeHtml(textOrMd);
+      postProcessMessage(el);
+    } catch (e) {
+      // fallback to plain text if deps failed to load
+      el.textContent = String(textOrMd ?? "");
+    }
+  };
+
+  // -----------------------------------
+  // Create and inject styles (your CSS)
+  // -----------------------------------
+  const styles = `
         .n8n-chat-widget {
             --chat--color-primary: var(--n8n-chat-primary-color, #059669);
             --chat--color-secondary: var(--n8n-chat-secondary-color, #047857);
@@ -231,7 +328,46 @@
             font-size: 14px;
             line-height: 1.5;
             animation: fadeIn 0.3s ease;
-            white-space: pre-wrap;
+            /* IMPORTANT: allow HTML markdown layout */
+            white-space: normal;
+        }
+
+        /* Markdown styling inside messages */
+        .n8n-chat-widget .chat-message p { margin: 0 0 10px 0; }
+        .n8n-chat-widget .chat-message p:last-child { margin-bottom: 0; }
+        .n8n-chat-widget .chat-message ul,
+        .n8n-chat-widget .chat-message ol { margin: 8px 0 8px 18px; padding: 0; }
+        .n8n-chat-widget .chat-message li { margin: 4px 0; }
+        .n8n-chat-widget .chat-message blockquote {
+            margin: 10px 0;
+            padding: 8px 12px;
+            border-left: 3px solid rgba(0,0,0,0.2);
+            background: rgba(0,0,0,0.03);
+            border-radius: 8px;
+        }
+        .n8n-chat-widget .chat-message code {
+            padding: 2px 6px;
+            border-radius: 6px;
+            background: rgba(0,0,0,0.06);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 0.95em;
+        }
+        .n8n-chat-widget .chat-message pre {
+            margin: 10px 0;
+            padding: 12px;
+            border-radius: 10px;
+            background: rgba(0,0,0,0.08);
+            overflow: auto;
+        }
+        .n8n-chat-widget .chat-message pre code {
+            background: transparent;
+            padding: 0;
+            display: block;
+            white-space: pre;
+        }
+        .n8n-chat-widget .chat-message a {
+            color: inherit;
+            text-decoration: underline;
         }
 
         @keyframes fadeIn {
@@ -357,123 +493,138 @@
         }
     `;
 
-    // Load Font dynamically
-    const loadFont = (fontFamily) => {
-        if (!fontFamily || fontFamily === 'Geist Sans') {
-            const fontLink = document.createElement('link');
-            fontLink.rel = 'stylesheet';
-            fontLink.href = 'https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-sans/style.css';
-            document.head.appendChild(fontLink);
-            return;
-        }
-
-        const fontLink = document.createElement('link');
-        fontLink.rel = 'stylesheet';
-        fontLink.href = `https://fonts.googleapis.com/css2?family=${fontFamily.replace(/ /g, '+')}:wght@400;500;600;700&display=swap`;
-        document.head.appendChild(fontLink);
-    };
-
-    // Inject styles
-    const styleSheet = document.createElement('style');
-    styleSheet.textContent = styles;
-    document.head.appendChild(styleSheet);
-
-    // Default configuration
-    const defaultConfig = {
-        webhook: {
-            url: '',
-            route: ''
-        },
-        branding: {
-            logo: '',
-            name: '',
-            welcomeText: 'Hi there 👋',
-            responseTimeText: 'We typically reply in a few minutes',
-        },
-        style: {
-            primaryColor: '',
-            secondaryColor: '',
-            position: 'right',
-            backgroundColor: '#ffffff',
-            fontColor: '#333333',
-            fontFamily: 'Geist Sans'
-        },
-        behavior: {
-            isOpenByDefault: false,
-            popupMessage: '',
-            autoOpenDelay: 0,
-            animation: 'fade',
-            soundEnabled: true,
-            showInitialMessage: true,
-            initialMessage: 'Hello! How can I help you today?'
-        },
-        faq: [] // Array of { question: string, answer: string }
-    };
-
-    // Merge user config with defaults
-    const config = window.ChatWidgetConfig ?
-        {
-            webhook: { ...defaultConfig.webhook, ...window.ChatWidgetConfig.webhook },
-            branding: { ...defaultConfig.branding, ...window.ChatWidgetConfig.branding },
-            style: { ...defaultConfig.style, ...window.ChatWidgetConfig.style },
-            behavior: { ...defaultConfig.behavior, ...window.ChatWidgetConfig.behavior },
-            faq: window.ChatWidgetConfig.faq || defaultConfig.faq
-        } : defaultConfig;
-
-    loadFont(config.style.fontFamily);
-
-    // Prevent multiple initializations
-    if (window.N8NChatWidgetInitialized) return;
-    window.N8NChatWidgetInitialized = true;
-
-    let currentSessionId = localStorage.getItem('n8n-chat-session-id');
-    if (!currentSessionId) {
-        currentSessionId = crypto.randomUUID();
-        localStorage.setItem('n8n-chat-session-id', currentSessionId);
+  // Load Font dynamically
+  const loadFont = (fontFamily) => {
+    if (!fontFamily || fontFamily === "Geist Sans") {
+      const fontLink = document.createElement("link");
+      fontLink.rel = "stylesheet";
+      fontLink.href = "https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-sans/style.css";
+      document.head.appendChild(fontLink);
+      return;
     }
 
-    // Create widget container
-    const widgetContainer = document.createElement('div');
-    widgetContainer.className = 'n8n-chat-widget';
+    const fontLink = document.createElement("link");
+    fontLink.rel = "stylesheet";
+    fontLink.href = `https://fonts.googleapis.com/css2?family=${fontFamily.replace(
+      / /g,
+      "+"
+    )}:wght@400;500;600;700&display=swap`;
+    document.head.appendChild(fontLink);
+  };
 
-    // Set CSS variables for colors
-    widgetContainer.style.setProperty('--n8n-chat-primary-color', config.style.primaryColor);
-    widgetContainer.style.setProperty('--n8n-chat-secondary-color', config.style.secondaryColor);
-    widgetContainer.style.setProperty('--n8n-chat-background-color', config.style.backgroundColor);
-    widgetContainer.style.setProperty('--n8n-chat-font-color', config.style.fontColor);
-    widgetContainer.style.setProperty('--n8n-chat-font-family', config.style.fontFamily);
+  // Inject styles
+  const styleSheet = document.createElement("style");
+  styleSheet.textContent = styles;
+  document.head.appendChild(styleSheet);
 
-    const chatContainer = document.createElement('div');
-    chatContainer.className = `chat-container${config.style.position === 'left' ? ' position-left' : ''}`;
+  // Default configuration
+  const defaultConfig = {
+    webhook: { url: "", route: "" },
+    branding: {
+      logo: "",
+      name: "",
+      welcomeText: "Hi there 👋",
+      responseTimeText: "We typically reply in a few minutes"
+    },
+    style: {
+      primaryColor: "",
+      secondaryColor: "",
+      position: "right",
+      backgroundColor: "#ffffff",
+      fontColor: "#333333",
+      fontFamily: "Geist Sans"
+    },
+    behavior: {
+      isOpenByDefault: false,
+      popupMessage: "",
+      autoOpenDelay: 0,
+      animation: "fade",
+      soundEnabled: true,
+      showInitialMessage: true,
+      initialMessage: "Hello! How can I help you today?"
+    },
+    faq: []
+  };
 
-    // Generate FAQ HTML
-    const faqHTML = config.faq.length > 0 ? `
+  // Merge user config with defaults
+  const config = window.ChatWidgetConfig
+    ? {
+        webhook: { ...defaultConfig.webhook, ...window.ChatWidgetConfig.webhook },
+        branding: { ...defaultConfig.branding, ...window.ChatWidgetConfig.branding },
+        style: { ...defaultConfig.style, ...window.ChatWidgetConfig.style },
+        behavior: { ...defaultConfig.behavior, ...window.ChatWidgetConfig.behavior },
+        faq: window.ChatWidgetConfig.faq || defaultConfig.faq
+      }
+    : defaultConfig;
+
+  loadFont(config.style.fontFamily);
+
+  // Prevent multiple initializations
+  if (window.N8NChatWidgetInitialized) return;
+  window.N8NChatWidgetInitialized = true;
+
+  let currentSessionId = localStorage.getItem("n8n-chat-session-id");
+  if (!currentSessionId) {
+    // crypto.randomUUID() fallback
+    currentSessionId =
+      (window.crypto && crypto.randomUUID && crypto.randomUUID()) ||
+      ("sess_" + Math.random().toString(16).slice(2) + Date.now().toString(16));
+    localStorage.setItem("n8n-chat-session-id", currentSessionId);
+  }
+
+  // Create widget container
+  const widgetContainer = document.createElement("div");
+  widgetContainer.className = "n8n-chat-widget";
+
+  // Set CSS variables for colors
+  widgetContainer.style.setProperty("--n8n-chat-primary-color", config.style.primaryColor);
+  widgetContainer.style.setProperty("--n8n-chat-secondary-color", config.style.secondaryColor);
+  widgetContainer.style.setProperty("--n8n-chat-background-color", config.style.backgroundColor);
+  widgetContainer.style.setProperty("--n8n-chat-font-color", config.style.fontColor);
+  widgetContainer.style.setProperty("--n8n-chat-font-family", config.style.fontFamily);
+
+  const chatContainer = document.createElement("div");
+  chatContainer.className = `chat-container${config.style.position === "left" ? " position-left" : ""}`;
+
+  // Generate FAQ HTML (escape to avoid config injection)
+  const faqHTML =
+    config.faq.length > 0
+      ? `
         <div class="faq-section">
             <div class="faq-title">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
                 Quick answers
             </div>
-            ${config.faq.map(item => `
+            ${config.faq
+              .map(
+                (item) => `
                 <div class="faq-item">
                     <button class="faq-question">
-                        ${item.question}
+                        ${escapeHtml(item.question)}
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
                     </button>
-                    <div class="faq-answer">${item.answer}</div>
+                    <div class="faq-answer">${escapeHtml(item.answer)}</div>
                 </div>
-            `).join('')}
+            `
+              )
+              .join("")}
         </div>
-    ` : '';
+    `
+      : "";
 
-    const homeViewHTML = `
+  const safeBrandLogo =
+    config.branding.logo ||
+    "https://raw.githubusercontent.com/n8n-io/n8n/master/assets/n8n-logo.png";
+
+  const homeViewHTML = `
         <div class="brand-header">
-            <img src="${config.branding.logo || 'https://raw.githubusercontent.com/n8n-io/n8n/master/assets/n8n-logo.png'}" alt="${config.branding.name}">
-            <span>${config.branding.name}</span>
+            <img src="${escapeHtml(safeBrandLogo)}" alt="${escapeHtml(config.branding.name)}">
+            <span>${escapeHtml(config.branding.name)}</span>
             <button class="close-button">×</button>
         </div>
         <div class="home-view">
-            <h2 class="welcome-text">${config.branding.welcomeText}</h2>
-            <p class="response-text">${config.branding.responseTimeText}</p>
+            <h2 class="welcome-text">${escapeHtml(config.branding.welcomeText)}</h2>
+            <p class="response-text">${escapeHtml(config.branding.responseTimeText)}</p>
             
             <button class="new-chat-btn">
                 <svg class="message-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
@@ -483,18 +634,18 @@
             ${faqHTML}
         </div>
         <div class="chat-footer">
-            Powered by BenAI <a href="https://n8n.partnerlinks.io/m9g5u41hwszk" target="_blank">n8n</a>
+            Powered by BenAI <a href="https://n8n.partnerlinks.io/m9g5u41hwszk" target="_blank" rel="noopener noreferrer">n8n</a>
         </div>
     `;
 
-    const chatInterfaceHTML = `
+  const chatInterfaceHTML = `
         <div class="chat-interface">
             <div class="brand-header">
                 <button class="back-button" style="margin-right: 8px; background: none; border: none; cursor: pointer; color: var(--chat--color-font); display: flex; align-items: center;">
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
                 </button>
-                <img src="${config.branding.logo || 'https://raw.githubusercontent.com/n8n-io/n8n/master/assets/n8n-logo.png'}" alt="${config.branding.name}">
-                <span>${config.branding.name}</span>
+                <img src="${escapeHtml(safeBrandLogo)}" alt="${escapeHtml(config.branding.name)}">
+                <span>${escapeHtml(config.branding.name)}</span>
                 <button class="close-button" style="margin-left: auto;">×</button>
             </div>
             <div class="chat-messages"></div>
@@ -505,37 +656,37 @@
                 </button>
             </div>
             <div class="chat-footer">
-                Powered by BenAI <a href="https://n8n.partnerlinks.io/m9g5u41hwszk" target="_blank">n8n</a>
+                Powered by BenAI <a href="https://n8n.partnerlinks.io/m9g5u41hwszk" target="_blank" rel="noopener noreferrer">n8n</a>
             </div>
         </div>
     `;
 
-    chatContainer.innerHTML = homeViewHTML + chatInterfaceHTML;
+  chatContainer.innerHTML = homeViewHTML + chatInterfaceHTML;
 
-    const toggleButton = document.createElement('button');
-    toggleButton.className = `chat-toggle${config.style.position === 'left' ? ' position-left' : ''}`;
-    toggleButton.innerHTML = `
+  const toggleButton = document.createElement("button");
+  toggleButton.className = `chat-toggle${config.style.position === "left" ? " position-left" : ""}`;
+  toggleButton.innerHTML = `
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
         </svg>`;
 
-    widgetContainer.appendChild(chatContainer);
-    widgetContainer.appendChild(toggleButton);
+  widgetContainer.appendChild(chatContainer);
+  widgetContainer.appendChild(toggleButton);
 
-    // Proactive Popup
-    if (config.behavior.popupMessage && !config.behavior.isOpenByDefault) {
-        const popup = document.createElement('div');
-        popup.className = `chat-popup ${config.behavior.animation}`;
-        popup.innerHTML = `
-            <span>${config.behavior.popupMessage}</span>
+  // Proactive Popup
+  if (config.behavior.popupMessage && !config.behavior.isOpenByDefault) {
+    const popup = document.createElement("div");
+    popup.className = `chat-popup ${config.behavior.animation}`;
+    popup.innerHTML = `
+            <span>${escapeHtml(config.behavior.popupMessage)}</span>
             <button class="close-popup">×</button>
         `;
-        // Add styles for popup
-        const popupStyles = `
+    // Add styles for popup
+    const popupStyles = `
             .chat-popup {
                 position: absolute;
                 bottom: 80px;
-                ${config.style.position === 'left' ? 'left: 20px;' : 'right: 20px;'}
+                ${config.style.position === "left" ? "left: 20px;" : "right: 20px;"}
                 background: white;
                 padding: 12px 16px;
                 border-radius: 12px;
@@ -569,213 +720,249 @@
                 color: #333;
             }
         `;
-        const popupStyleSheet = document.createElement('style');
-        popupStyleSheet.textContent = popupStyles;
-        document.head.appendChild(popupStyleSheet);
+    const popupStyleSheet = document.createElement("style");
+    popupStyleSheet.textContent = popupStyles;
+    document.head.appendChild(popupStyleSheet);
 
-        widgetContainer.appendChild(popup);
+    widgetContainer.appendChild(popup);
 
-        window.n8nChatPopupTimer = setTimeout(() => {
-            popup.classList.add('visible');
-            if (config.behavior.soundEnabled) {
-                const audio = new Audio('data:audio/mp3;base64,//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq');
-                audio.volume = 0.5;
-                audio.play().catch(e => console.log('Audio play failed due to user interaction policy', e));
-            }
-        }, config.behavior.autoOpenDelay * 1000);
+    window.n8nChatPopupTimer = setTimeout(() => {
+      popup.classList.add("visible");
+      if (config.behavior.soundEnabled) {
+        const audio = new Audio(
+          "data:audio/mp3;base64,//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
+        );
+        audio.volume = 0.5;
+        audio.play().catch((e) => console.log("Audio play failed due to user interaction policy", e));
+      }
+    }, config.behavior.autoOpenDelay * 1000);
 
-        popup.querySelector('.close-popup').addEventListener('click', (e) => {
-            e.stopPropagation();
-            popup.remove();
-        });
+    popup.querySelector(".close-popup").addEventListener("click", (e) => {
+      e.stopPropagation();
+      popup.remove();
+    });
 
-        popup.addEventListener('click', () => {
-            chatContainer.classList.add('open');
-            popup.remove();
-        });
+    popup.addEventListener("click", () => {
+      chatContainer.classList.add("open");
+      popup.remove();
+    });
+  }
+
+  document.body.appendChild(widgetContainer);
+
+  if (config.behavior.isOpenByDefault) {
+    setTimeout(() => {
+      chatContainer.classList.add("open");
+    }, config.behavior.autoOpenDelay * 1000);
+  }
+
+  // Elements
+  const newChatBtn = chatContainer.querySelector(".new-chat-btn");
+  const chatInterface = chatContainer.querySelector(".chat-interface");
+  const homeView = chatContainer.querySelector(".home-view");
+  const messagesContainer = chatContainer.querySelector(".chat-messages");
+  const textarea = chatContainer.querySelector("textarea");
+  const sendButton = chatContainer.querySelector('button[type="submit"]');
+  const backButton = chatContainer.querySelector(".back-button");
+
+  function autoResizeTextarea() {
+    textarea.style.height = "auto";
+    textarea.style.height = textarea.scrollHeight + "px";
+  }
+
+  const scrollToBottom = () => {
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  };
+
+  const addMessage = async ({ role, text }) => {
+    const div = document.createElement("div");
+    div.className = `chat-message ${role}`;
+    messagesContainer.appendChild(div);
+    await setMessageContent(div, text);
+    scrollToBottom();
+    return div;
+  };
+
+  const renderFaqAnswersAsMarkdown = async () => {
+    if (!config.faq?.length) return;
+    // Render answers (the DOM nodes exist now)
+    const nodes = chatContainer.querySelectorAll(".faq-answer");
+    if (!nodes?.length) return;
+
+    try {
+      await ensureMarkdownReady();
+      nodes.forEach((node, idx) => {
+        const raw = config.faq[idx]?.answer ?? node.textContent ?? "";
+        node.innerHTML = markdownToSafeHtml(raw);
+        postProcessMessage(node);
+      });
+    } catch (e) {
+      // leave as-is
+    }
+  };
+
+  async function startNewConversation() {
+    // Switch view
+    homeView.style.display = "none";
+    chatContainer.querySelector(".brand-header").style.display = "none"; // Hide home header
+    chatInterface.classList.add("active");
+
+    // Reset messages
+    messagesContainer.innerHTML = "";
+
+    // Add initial bot message if enabled
+    if (config.behavior.showInitialMessage) {
+      await addMessage({
+        role: "bot",
+        text: config.behavior.initialMessage || "Hello! How can I help you today?"
+      });
     }
 
-    document.body.appendChild(widgetContainer);
+    const data = [
+      {
+        action: "loadPreviousSession",
+        sessionId: currentSessionId,
+        route: config.webhook.route,
+        metadata: { userId: "" }
+      }
+    ];
 
-    if (config.behavior.isOpenByDefault) {
-        setTimeout(() => {
-            chatContainer.classList.add('open');
-        }, config.behavior.autoOpenDelay * 1000);
+    try {
+      const response = await fetch(config.webhook.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data)
+      });
+
+      const responseData = await response.json();
+      const botText = Array.isArray(responseData) ? responseData[0]?.output : responseData?.output;
+
+      if (botText) {
+        await addMessage({ role: "bot", text: botText });
+      }
+    } catch (error) {
+      console.error("Error:", error);
+      await addMessage({
+        role: "bot",
+        text: "Sorry, something went wrong. Please try again."
+      });
     }
+  }
 
-    // Elements
-    const newChatBtn = chatContainer.querySelector('.new-chat-btn');
-    const chatInterface = chatContainer.querySelector('.chat-interface');
-    const homeView = chatContainer.querySelector('.home-view');
-    const messagesContainer = chatContainer.querySelector('.chat-messages');
-    const textarea = chatContainer.querySelector('textarea');
-    const sendButton = chatContainer.querySelector('button[type="submit"]');
-    const backButton = chatContainer.querySelector('.back-button');
+  async function sendMessage(message) {
+    const messageData = {
+      action: "sendMessage",
+      sessionId: currentSessionId,
+      route: config.webhook.route,
+      chatInput: message,
+      metadata: { userId: "" }
+    };
 
-    function autoResizeTextarea() {
-        textarea.style.height = 'auto';
-        textarea.style.height = textarea.scrollHeight + 'px';
+    await addMessage({ role: "user", text: message });
+
+    try {
+      const response = await fetch(config.webhook.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(messageData)
+      });
+
+      const data = await response.json();
+      const botText = Array.isArray(data) ? data[0]?.output : data?.output;
+
+      if (botText) {
+        await addMessage({ role: "bot", text: botText });
+      }
+    } catch (error) {
+      console.error("Error:", error);
+      await addMessage({
+        role: "bot",
+        text: "Sorry, something went wrong. Please try again."
+      });
     }
+  }
 
-    async function startNewConversation() {
-        // Switch view
-        homeView.style.display = 'none';
-        chatContainer.querySelector('.brand-header').style.display = 'none'; // Hide home header
-        chatInterface.classList.add('active');
+  // Event Listeners
+  newChatBtn.addEventListener("click", async () => {
+    await renderFaqAnswersAsMarkdown(); // ensures markdown libs are loaded early
+    startNewConversation();
+  });
 
-        // Reset messages
-        messagesContainer.innerHTML = '';
+  backButton.addEventListener("click", () => {
+    chatInterface.classList.remove("active");
+    homeView.style.display = "flex";
+    chatContainer.querySelector(".brand-header").style.display = "flex";
+  });
 
-        // Add initial bot message if enabled
-        if (config.behavior.showInitialMessage) {
-            const initialMessageDiv = document.createElement('div');
-            initialMessageDiv.className = 'chat-message bot';
-            initialMessageDiv.textContent = config.behavior.initialMessage || "Hello! How can I help you today?";
-            messagesContainer.appendChild(initialMessageDiv);
-        }
-
-        const data = [{
-            action: "loadPreviousSession",
-            sessionId: currentSessionId,
-            route: config.webhook.route,
-            metadata: {
-                userId: ""
-            }
-        }];
-
-        try {
-            const response = await fetch(config.webhook.url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(data)
-            });
-
-            const responseData = await response.json();
-
-            const botMessageDiv = document.createElement('div');
-            botMessageDiv.className = 'chat-message bot';
-            botMessageDiv.textContent = Array.isArray(responseData) ? responseData[0].output : responseData.output;
-            messagesContainer.appendChild(botMessageDiv);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        } catch (error) {
-            console.error('Error:', error);
-        }
+  sendButton.addEventListener("click", () => {
+    const message = textarea.value.trim();
+    if (message) {
+      sendMessage(message);
+      textarea.value = "";
+      textarea.style.height = "auto";
     }
+  });
 
-    async function sendMessage(message) {
-        const messageData = {
-            action: "sendMessage",
-            sessionId: currentSessionId,
-            route: config.webhook.route,
-            chatInput: message,
-            metadata: {
-                userId: ""
-            }
-        };
+  textarea.addEventListener("input", autoResizeTextarea);
 
-        const userMessageDiv = document.createElement('div');
-        userMessageDiv.className = 'chat-message user';
-        userMessageDiv.textContent = message;
-        messagesContainer.appendChild(userMessageDiv);
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-
-        try {
-            const response = await fetch(config.webhook.url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(messageData)
-            });
-
-            const data = await response.json();
-
-            const botMessageDiv = document.createElement('div');
-            botMessageDiv.className = 'chat-message bot';
-            botMessageDiv.textContent = Array.isArray(data) ? data[0].output : data.output;
-            messagesContainer.appendChild(botMessageDiv);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        } catch (error) {
-            console.error('Error:', error);
-        }
+  textarea.addEventListener("keypress", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      const message = textarea.value.trim();
+      if (message) {
+        sendMessage(message);
+        textarea.value = "";
+        textarea.style.height = "auto";
+      }
     }
+  });
 
-    // Event Listeners
-    newChatBtn.addEventListener('click', startNewConversation);
+  toggleButton.addEventListener("click", async () => {
+    chatContainer.classList.toggle("open");
 
-    backButton.addEventListener('click', () => {
-        chatInterface.classList.remove('active');
-        homeView.style.display = 'flex';
-        chatContainer.querySelector('.brand-header').style.display = 'flex';
+    // Stop/Remove popup if chat is opened
+    if (chatContainer.classList.contains("open")) {
+      if (window.n8nChatPopupTimer) {
+        clearTimeout(window.n8nChatPopupTimer);
+        window.n8nChatPopupTimer = null;
+      }
+      const popup = widgetContainer.querySelector(".chat-popup");
+      if (popup) popup.remove();
+
+      // Warm up markdown libs so first reply renders immediately
+      renderFaqAnswersAsMarkdown();
+    }
+  });
+
+  // FAQ Accordion
+  const faqQuestions = chatContainer.querySelectorAll(".faq-question");
+  faqQuestions.forEach((question) => {
+    question.addEventListener("click", () => {
+      const item = question.parentElement;
+      const isActive = item.classList.contains("active");
+
+      // Close all other items
+      chatContainer.querySelectorAll(".faq-item").forEach((otherItem) => {
+        otherItem.classList.remove("active");
+        otherItem.querySelector(".faq-answer").style.maxHeight = null;
+      });
+
+      if (!isActive) {
+        item.classList.add("active");
+        const answer = item.querySelector(".faq-answer");
+        answer.style.maxHeight = answer.scrollHeight + "px";
+      }
     });
+  });
 
-    sendButton.addEventListener('click', () => {
-        const message = textarea.value.trim();
-        if (message) {
-            sendMessage(message);
-            textarea.value = '';
-            textarea.style.height = 'auto';
-        }
+  // Close button handlers
+  const closeButtons = chatContainer.querySelectorAll(".close-button");
+  closeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      chatContainer.classList.remove("open");
     });
+  });
 
-    textarea.addEventListener('input', autoResizeTextarea);
-
-    textarea.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            const message = textarea.value.trim();
-            if (message) {
-                sendMessage(message);
-                textarea.value = '';
-                textarea.style.height = 'auto';
-            }
-        }
-    });
-
-    toggleButton.addEventListener('click', () => {
-        chatContainer.classList.toggle('open');
-
-        // Stop/Remove popup if chat is opened
-        if (chatContainer.classList.contains('open')) {
-            if (window.n8nChatPopupTimer) {
-                clearTimeout(window.n8nChatPopupTimer);
-                window.n8nChatPopupTimer = null;
-            }
-            const popup = widgetContainer.querySelector('.chat-popup');
-            if (popup) {
-                popup.remove();
-            }
-        }
-    });
-
-    // FAQ Accordion
-    const faqQuestions = chatContainer.querySelectorAll('.faq-question');
-    faqQuestions.forEach(question => {
-        question.addEventListener('click', () => {
-            const item = question.parentElement;
-            const isActive = item.classList.contains('active');
-
-            // Close all other items
-            chatContainer.querySelectorAll('.faq-item').forEach(otherItem => {
-                otherItem.classList.remove('active');
-                otherItem.querySelector('.faq-answer').style.maxHeight = null;
-            });
-
-            if (!isActive) {
-                item.classList.add('active');
-                const answer = item.querySelector('.faq-answer');
-                answer.style.maxHeight = answer.scrollHeight + "px";
-            }
-        });
-    });
-
-    // Close button handlers
-    const closeButtons = chatContainer.querySelectorAll('.close-button');
-    closeButtons.forEach(button => {
-        button.addEventListener('click', () => {
-            chatContainer.classList.remove('open');
-        });
-    });
+  // Render FAQ markdown early if possible (non-blocking)
+  renderFaqAnswersAsMarkdown();
 })();
